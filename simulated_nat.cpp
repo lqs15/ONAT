@@ -297,6 +297,7 @@ void* update(void*){
       }
       else{
          mapping[keytemp].life = 0;
+         if(1==flow_inswitch.count(keytemp)) continue;
          vc.push_back(pii(keytemp, temp.count - temp.precount));
          mapping_lock.lock();
          mapping[keytemp].precount = mapping[keytemp].count;
@@ -509,6 +510,7 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
     hlen = iph->ip_hlen * 4;
     pktidx = pktidx + hlen;               /* move the packet index to point to the transport layer */
      fivetuple key;
+     fivetuple key1;
     switch(iph->ip_proto)
     {
       case IPPROTO_TCP:
@@ -522,6 +524,13 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
             key.destport = ntohs(tcph->th_dport);
             sprintf(key.srcip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
             sprintf(key.destip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
+
+
+            key1.proto = 6;
+            key1.destport = ntohs(tcph->th_sport);
+            key1.srcport = ntohs(tcph->th_dport);
+            sprintf(key1.destip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
+            sprintf(key1.srcip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
 
              //是否在交换机中
             flow_inswitch_lock.lock();
@@ -540,7 +549,24 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
                return;
             }
             flow_inswitch_lock.unlock();
-            
+
+            flow_inswitch_lock.lock();
+            if(1==flow_inswitch.count(key1)){
+               offload_number += 1;
+               mapping_lock.lock();
+                if (1==mapping.count(key1)){
+                    mapping[key1].count = mapping[key1].count + 1;
+                    mapping[key1].size = mapping[key1].size + iph->ip_hlen * 4;
+                    mapping_lock.unlock();
+                }
+                else{
+                    mapping_lock.unlock();
+                }
+               flow_inswitch_lock.unlock();
+               return;
+            }
+            flow_inswitch_lock.unlock();
+
             //若不在交换机中，进行NAT处理
             no_offload_number += 1;
             mapping_lock.lock();
@@ -548,6 +574,11 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
                  
                  mapping[key].count = mapping[key].count + 1;
                  mapping[key].size = mapping[key].size + iph->ip_hlen * 4;
+                 mapping_lock.unlock();
+            }
+            else if(1==mapping.count(key1)){
+                 mapping[key1].count = mapping[key1].count + 1;
+                 mapping[key1].size = mapping[key1].size + iph->ip_hlen * 4;
                  mapping_lock.unlock();
             }
             else{
@@ -578,13 +609,21 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
         count_UDP++;
         udph = (UDPHdr *) pktidx;
         
-        key.srcport = ntohs(udph->uh_sport);
-        key.destport = ntohs(udph->uh_dport);
+            key.srcport = ntohs(udph->uh_sport);
+            key.destport = ntohs(udph->uh_dport);
             key.proto = 17;
             key.srcport = ntohs(udph->uh_sport);
             key.destport = ntohs(udph->uh_dport);
             sprintf(key.srcip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
             sprintf(key.destip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
+
+
+
+            key1.proto = 17;
+            key1.destport = ntohs(tcph->th_sport);
+            key1.srcport = ntohs(tcph->th_dport);
+            sprintf(key1.destip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
+            sprintf(key1.srcip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
 
              //是否在交换机中
             flow_inswitch_lock.lock();
@@ -603,6 +642,25 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
                return;
             }
             flow_inswitch_lock.unlock();
+
+
+
+            flow_inswitch_lock.lock();
+            if(1==flow_inswitch.count(key1)){
+               offload_number += 1;
+               mapping_lock.lock();
+                if (1==mapping.count(key1)){
+                    mapping[key1].count = mapping[key1].count + 1;
+                    mapping[key1].size = mapping[key1].size + iph->ip_hlen * 4;
+                    mapping_lock.unlock();
+                }
+                else{
+                    mapping_lock.unlock();
+                }
+               flow_inswitch_lock.unlock();
+               return;
+            }
+            flow_inswitch_lock.unlock();
             
             //若不在交换机中，进行NAT处理
             no_offload_number += 1;
@@ -611,6 +669,11 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
                  
                  mapping[key].count = mapping[key].count + 1;
                  mapping[key].size = mapping[key].size + iph->ip_hlen * 4;
+                 mapping_lock.unlock();
+            }
+            else if(1==mapping.count(key1)){
+                 mapping[key1].count = mapping[key1].count + 1;
+                 mapping[key1].size = mapping[key1].size + iph->ip_hlen * 4;
                  mapping_lock.unlock();
             }
             else{
