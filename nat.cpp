@@ -18,9 +18,14 @@
 #include <pthread.h>
 #include <unistd.h> 
 
+#include<fstream>
 
 
-
+// for file lock
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/file.h>
 
 
 #include <string.h>
@@ -229,7 +234,7 @@ vector<int>::iterator cache_count_it;
 vector<int> candidate_flow;
 vector <fivetuple> candidate_flow_key; 
 map <fivetuple, int>::iterator itt;
-
+vector<int> receive_vec;
 
 
 mutex mapping_lock;
@@ -265,6 +270,32 @@ void receive(vector<int> vec){
      }
 }
 
+int _pow(int base, int n) {
+    int result = 1;
+    while (n > 0) {
+        result*=base;
+        n--;
+    }
+    return result;
+}
+
+
+int atoii(char *str) {
+    int len = strlen(str); 
+    int s; int result;
+    if(len<=0){
+        return 0;
+    }
+    result = 0; 
+    s = 1;
+    for(int i = 0;i<len;++i) 
+    {      
+         result = result*10 + (str[i]-'0'); 
+    } 
+     return result*s;
+
+}
+
 void* offload(void*){
     fivetuple temp;
     int idx;
@@ -272,6 +303,7 @@ void* offload(void*){
     char dip[20];
     u_short sport;
     u_short dport;
+    FILE *fp;
      while(1){
         sender_buffer_lock.lock();
         if(sender_buffer.empty()==0){
@@ -289,6 +321,23 @@ void* offload(void*){
                  mapping_lock.unlock();
                  //sender1(sip,sport,dip,dport,idx);
                  sender3();
+                 fp = fopen("offload.txt", "a+");
+                 while(1){
+                   if(flock(fileno(fp),LOCK_EX|LOCK_NB)==-1){
+                      continue;
+                   }
+                   else{
+                      fseek(fp, 0, SEEK_END);
+                      fprintf(fp,"%s\n",sip);
+                      fprintf(fp,"%d\n",sport);
+                      fprintf(fp,"%s\n",dip);
+                      fprintf(fp,"%d\n",dport);
+                      fprintf(fp,"%d\n",idx);
+                      fclose(fp);
+                      break;
+                   }
+
+                 }
                  offload_flow_lock.lock();
                  offload_flow[temp] = idx;
                  offload_flow_lock.unlock();
@@ -370,25 +419,83 @@ void* update(void*){
 
 
 void* retreive(void*){
+
+
+    FILE *fp;
+    FILE *fp1;
+    char strline[20];
     while(1){
-    offload_flow_lock.lock();
-    for(itt = offload_flow.begin(); itt != offload_flow.end(); itt++) {
-        candidate_flow.push_back(offload_flow[itt->first]);
-        candidate_flow_key.push_back(itt->first);
-    }
-    offload_flow_lock.unlock();
+
+      fp = fopen("retrieve.txt", "a+");
+      int size = 1;
+      while(size){
+        
+        size = ftell(fp);
+      }
+      rewind(fp);
+      while(1){
+         if(flock(fileno(fp),LOCK_EX|LOCK_NB)==-1){
+              continue;
+          }
+          else{
+
+            offload_flow_lock.lock();
+            for(itt = offload_flow.begin(); itt != offload_flow.end(); itt++) {
+                candidate_flow.push_back(offload_flow[itt->first]);
+                fprintf(fp,"%d\n",offload_flow[itt->first]);
+                candidate_flow_key.push_back(itt->first);
+            }
+            offload_flow_lock.unlock();
+            
+            fclose(fp);
+            break;
+          }
+
+      }
     receive(candidate_flow);
+
+    
+    fp1 = fopen("response_retrieve.txt", "a+");
+    size = 0;
+    while(!size){
+      fseek(fp1, 0, SEEK_END);
+      size = ftell(fp1);
+    }
+    rewind(fp1);
+    while(1){
+      if(flock(fileno(fp1),LOCK_EX|LOCK_NB)==-1){
+          continue;
+      }
+      else{
+              while(!feof(fp1)){
+                fgets(strline,20,fp1);
+                if(strline[strlen(strline)-1]=='\n') strline[strlen(strline)-1] = 0;
+                receive_vec.push_back(atoii(strline));
+              }
+              fstream fout("response_retrieve.txt",ios::out|ios::trunc);
+              fout.close();
+              fclose(fp1);
+              break;
+          }
+
+    }
+
     for(int i=0;i<candidate_flow_key.size();i++){
       mapping_lock.lock();
       if(1==mapping.count(candidate_flow_key[i])){
-        mapping[candidate_flow_key[i]].count += 0;
+        mapping[candidate_flow_key[i]].count += receive_vec[i];
         mapping_lock.unlock();
       }
       else{
          mapping_lock.unlock();
       }
     }
+
+
+
+
     vector <int>().swap(candidate_flow);
+    vector <int>().swap(receive_vec);
     vector <fivetuple>().swap(candidate_flow_key);
     sleep(1);
 }
@@ -398,6 +505,7 @@ void* retreive(void*){
 void* deleter(void*){
     fivetuple temp;
     int idx;
+    FILE *fp;
      while(1){
         if(delete_buffer.empty()==0){
            temp = delete_buffer.front();
@@ -411,6 +519,19 @@ void* deleter(void*){
                    idx = offload_flow[temp];
                    offload_flow_lock.unlock();
                    sender2(idx);
+
+                   fp = fopen("delete.txt", "a+");
+                   while(1){
+                      if(flock(fileno(fp,LOCK_EX|LOCK_NB)==-1){
+                      continue;
+                      }
+                      else{
+                         fseek(fp, 0, SEEK_END);
+                         fprintf(fp,"%d\n",idx);
+                         fclose(fp);
+                         break;
+                      }
+                    }
                    offload_flow_lock.lock();
                    offload_flow.erase(temp);
                    offload_flow_lock.unlock();
@@ -425,7 +546,8 @@ void* deleter(void*){
            
 
         }
-     }
+      }
+     
 }
 
 
@@ -595,6 +717,7 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
     hlen = iph->ip_hlen * 4;
     pktidx = pktidx + hlen;               /* move the packet index to point to the transport layer */
      fivetuple key;
+     fivetuple key1;
     switch(iph->ip_proto)
     {
       case IPPROTO_TCP:
@@ -607,11 +730,28 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
             key.destport = ntohs(tcph->th_dport);
             sprintf(key.srcip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
             sprintf(key.destip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
+
+
+            
+            key1.proto = 6;
+            key1.destport = ntohs(tcph->th_sport);
+            key1.srcport = ntohs(tcph->th_dport);
+            sprintf(key1.destip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
+            sprintf(key1.srcip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
+                 
+
+
+
             mapping_lock.lock();
             if (1==mapping.count(key)){
                  
                  mapping[key].count = mapping[key].count + 1;
                  mapping[key].size = mapping[key].size + iph->ip_hlen * 4;
+                 mapping_lock.unlock();
+            }
+            else if(1==mapping.count(key1)){
+                 mapping[key1].count = mapping[key1].count + 1;
+                 mapping[key1].size = mapping[key1].size + iph->ip_hlen * 4;
                  mapping_lock.unlock();
             }
             else{
@@ -649,11 +789,27 @@ void callback(u_char* user,const struct pcap_pkthdr* header,const u_char* pkt_da
             key.destport = ntohs(udph->uh_dport);
             sprintf(key.srcip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
             sprintf(key.destip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
+
+
+
+
+            key1.proto = 17;
+            key1.destport = ntohs(tcph->th_sport);
+            key1.srcport = ntohs(tcph->th_dport);
+            sprintf(key1.destip, "%u.%u.%u.%u", iph->ip_src[0],iph->ip_src[1],iph->ip_src[2],iph->ip_src[3]);
+            sprintf(key1.srcip, "%u.%u.%u.%u", iph->ip_dst[0],iph->ip_dst[1],iph->ip_dst[2],iph->ip_dst[3]);
+
+
             mapping_lock.lock();
             if (1==mapping.count(key)){
                  
                  mapping[key].count = mapping[key].count + 1;
                  mapping[key].size = mapping[key].size + iph->ip_hlen * 4;
+                 mapping_lock.unlock();
+            }
+            else if(1==mapping.count(key1)){
+                 mapping[key1].count = mapping[key1].count + 1;
+                 mapping[key1].size = mapping[key1].size + iph->ip_hlen * 4;
                  mapping_lock.unlock();
             }
             else{
